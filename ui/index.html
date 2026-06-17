@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Q&A Agent Chat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: row; /* Change to row for side-by-side layout */
+            justify-content: center;
+            align-items: flex-start; /* Align items to the start of the cross axis */
+            height: 100vh;
+            gap: 20px; /* Space between chat and plot containers */
+        }
+        .chat-container {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            width: 70%; /* Chat container takes 70% width */
+            max-width: 70%; /* Ensure it doesn't exceed 70% */
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-grow: 1;
+            margin-bottom: 0; /* Remove bottom margin */
+            height: 90vh; /* Take up most of the viewport height */
+        }
+        .chat-messages {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            border-bottom: 1px solid #eee;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            border-radius: 5px;
+            max-width: 80%;
+        }
+        .message.user {
+            background-color: #dcf8c6;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .message.agent {
+            background-color: #e0e0e0;
+            align-self: flex-start;
+            margin-right: auto;
+        }
+        .chat-input {
+            display: flex;
+            padding: 10px;
+            border-top: 1px solid #eee;
+        }
+        .chat-input input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-right: 10px;
+        }
+        .chat-input button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .chat-input button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+    <style>
+        .plot-container {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            width: 30%; /* Plot container takes 30% width */
+            max-width: 30%;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            height: 90vh; /* Take up most of the viewport height */
+            overflow-y: auto;
+        }
+        .plot-container img {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-messages" id="chat-messages">
+            <!-- Messages will be appended here -->
+        </div>
+        <div class="chat-input">
+            <input type="text" id="user-input" placeholder="Type your message...">
+            <button id="send-button">Send</button>
+        </div>
+    </div>
+    <div class="plot-container">
+        <h2>Plots</h2>
+        <img id="plot-image" src="" alt="Generated Plot" style="max-width: 100%; height: auto; display: none;">
+        <p id="no-plot-message">No plot available yet.</p>
+    </div>
+
+    <script>
+        const chatMessages = document.getElementById('chat-messages');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+
+        const ws = new WebSocket("ws://localhost:8000/ws");
+
+        ws.onopen = (event) => {
+            console.log("WebSocket opened:", event);
+            appendMessage("Agent", "Hello! How can I help you today?", "agent");
+        };
+
+        ws.onmessage = (event) => {
+            console.log("Message from server:", event.data);
+            // For streaming, we need to append chunks to the last agent message
+            const lastMessage = chatMessages.lastElementChild;
+            if (lastMessage && lastMessage.classList.contains('agent') && !lastMessage.dataset.complete) {
+                lastMessage.textContent += event.data;
+            } else {
+                appendMessage("Agent", event.data, "agent");
+            }
+            chatMessages.scrollTop = chatMessages.scrollHeight; // Scroll to bottom
+            updatePlotImage(); // Call function to update plot image
+        };
+
+        ws.onclose = (event) => {
+            console.log("WebSocket closed:", event);
+            appendMessage("System", "Connection closed. Please refresh to reconnect.", "agent");
+        };
+
+        ws.onerror = (error) => {
+            console.error("WebSocket error:", error);
+            appendMessage("System", "An error occurred with the connection.", "agent");
+        };
+
+        function appendMessage(sender, text, type) {
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message', type);
+            messageDiv.textContent = text;
+            chatMessages.appendChild(messageDiv);
+        }
+
+        function sendMessage() {
+            const message = userInput.value.trim();
+            if (message) {
+                appendMessage("You", message, "user");
+                ws.send(message);
+                userInput.value = '';
+                // Mark the last agent message as complete before sending new user message
+                const lastAgentMessage = chatMessages.lastElementChild;
+                if (lastAgentMessage && lastAgentMessage.classList.contains('agent')) {
+                    lastAgentMessage.dataset.complete = "true";
+                }
+            }
+        }
+
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (event) => {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+    <script>
+        const plotImage = document.getElementById('plot-image');
+        const noPlotMessage = document.getElementById('no-plot-message');
+
+        async function updatePlotImage() {
+            try {
+                const response = await fetch('/list_plots'); // Endpoint to list plots
+                const plotFiles = await response.json();
+                if (plotFiles.length > 0) {
+                    // Assuming the last plot generated is the one we want to display
+                    const latestPlot = plotFiles[plotFiles.length - 1];
+                    plotImage.src = `/plots/${latestPlot}?t=${new Date().getTime()}`; // Add timestamp to bust cache
+                    plotImage.style.display = 'block';
+                    noPlotMessage.style.display = 'none';
+                } else {
+                    plotImage.style.display = 'none';
+                    noPlotMessage.style.display = 'block';
+                }
+            } catch (error) {
+                console.error("Error fetching plot list:", error);
+                plotImage.style.display = 'none';
+                noPlotMessage.style.display = 'block';
+            }
+        }
+
+        // Initial plot update when the page loads
+        updatePlotImage();
+    </script>
+</body>
+</html>
